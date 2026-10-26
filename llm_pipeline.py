@@ -1,8 +1,20 @@
 import os
+import time
 import google.generativeai as genai
+from google.api_core.exceptions import ResourceExhausted
 
 genai.configure(api_key=os.environ.get("GEMINI_API_KEY"))
 model = genai.GenerativeModel("gemini-3.8-flash")
+
+# --- Rate limiting: free tier allows ~5 requests/minute for this model ---
+MIN_SECONDS_BETWEEN_CALLS = 13  # 60s / 5 requests = 12s, +1s safety margin
+_last_call_time = [0.0]
+
+def _wait_for_rate_limit():
+    elapsed = time.time() - _last_call_time[0]
+    if elapsed < MIN_SECONDS_BETWEEN_CALLS:
+        time.sleep(MIN_SECONDS_BETWEEN_CALLS - elapsed)
+    _last_call_time[0] = time.time()
 
 EXTRACTION_PROMPT = """You are a legal-clause structured information extractor.
 Given a clause from a rental agreement or employment offer letter, extract the fields below.
@@ -41,9 +53,22 @@ English text:
 Hindi translation:
 """
 
-def call_llm(prompt: str) -> str:
-    response = model.generate_content(prompt)
-    return response.text.strip()
+def call_llm(prompt: str, max_retries: int = 3) -> str:
+    """Calls Gemini with built-in rate limiting and automatic retry on quota errors."""
+    for attempt in range(max_retries):
+        _wait_for_rate_limit()
+        try:
+            response = model.generate_content(prompt)
+            return response.text.strip()
+        except ResourceExhausted as e:
+            wait_time = 15 * (attempt + 1)  # back off more each retry
+            if attempt < max_retries - 1:
+                time.sleep(wait_time)
+                continue
+            else:
+                return f"[RATE LIMIT ERROR after {max_retries} retries: {e}]"
+        except Exception as e:
+            return f"[LLM ERROR: {e}]"
 
 def extract_structured(clause_text: str) -> str:
     return call_llm(EXTRACTION_PROMPT.format(clause=clause_text))
