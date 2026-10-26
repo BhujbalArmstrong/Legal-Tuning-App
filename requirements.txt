@@ -1,0 +1,13 @@
+streamlit
+pytesseract
+pdf2image
+pillow
+deep-translator
+evaluate
+rouge-score
+bert-score
+sacrebleu
+pandas
+google-generativeai
+python-docx
+regex
