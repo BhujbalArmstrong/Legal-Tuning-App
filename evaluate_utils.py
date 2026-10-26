@@ -1,4 +1,5 @@
 import re
+import pandas as pd
 import evaluate
 
 rouge = evaluate.load("rouge")
@@ -31,3 +32,25 @@ def compute_bertscore(reference: str, prediction: str, lang="en") -> dict:
 def round_trip_consistency(original_en: str, back_translated_en: str) -> dict:
     bert = compute_bertscore(original_en, back_translated_en)
     return bert
+
+def aggregate_summary(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Produces one summary row per pipeline:
+    - total clauses processed
+    - % of clauses with a number/date mismatch (critical error rate)
+    - average back-translation consistency score
+    """
+    def f1_mean(series):
+        numeric = pd.to_numeric(series, errors="coerce")
+        return numeric.mean()
+
+    summary = df.groupby("Pipeline").agg(
+        total_clauses=("Pipeline", "count"),
+        mismatch_count=("Number mismatch flag", lambda x: (x == "⚠️ YES").sum()),
+        avg_backtranslation_f1=("Back-translation (round-trip) BERTScore F1", f1_mean),
+    ).reset_index()
+
+    summary["mismatch_rate_%"] = (summary["mismatch_count"] / summary["total_clauses"] * 100).round(1)
+    summary["avg_backtranslation_f1"] = summary["avg_backtranslation_f1"].round(3)
+
+    return summary
