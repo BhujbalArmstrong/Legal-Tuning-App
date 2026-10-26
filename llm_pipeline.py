@@ -2,7 +2,7 @@ import os
 import google.generativeai as genai
 
 genai.configure(api_key=os.environ.get("GEMINI_API_KEY"))
-model = genai.GenerativeModel("gemini-2.0-flash")
+model = genai.GenerativeModel("gemini-3.8-flash")
 
 EXTRACTION_PROMPT = """You are a legal-clause structured information extractor.
 Given a clause from a rental agreement or employment offer letter, extract the fields below.
