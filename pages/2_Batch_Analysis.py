@@ -22,7 +22,7 @@ uploaded_files = st.file_uploader(
 )
 
 max_clauses_per_doc = st.slider("Max clauses to process PER document", 1, 15, 5)
-delay_seconds = st.slider("Delay between clauses (seconds) — increase if you hit rate-limit errors", 1, 10, 3)
+delay_seconds = st.slider("Delay between clauses (seconds) — increase if you hit rate-limit errors", 5, 30, 15)
 
 if uploaded_files and st.button("Run Batch Analysis"):
     all_rows = []
