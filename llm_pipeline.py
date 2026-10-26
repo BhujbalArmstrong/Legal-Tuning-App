@@ -2,31 +2,7 @@ import os
 import google.generativeai as genai
 
 genai.configure(api_key=os.environ.get("GEMINI_API_KEY"))
-import os
-import google.generativeai as genai
-
-genai.configure(api_key=os.environ.get("GEMINI_API_KEY"))
-
-def get_working_model():
-    """Try a list of known model names in order until one works."""
-    candidates = [
-        "gemini-2.5-flash",
-        "gemini-2.0-flash",
-        "gemini-flash-latest",
-        "gemini-1.5-flash",
-        "gemini-pro-latest",
-    ]
-    for name in candidates:
-        try:
-            m = genai.GenerativeModel(name)
-            # quick test call to confirm it actually works
-            m.generate_content("test")
-            return m
-        except Exception:
-            continue
-    raise RuntimeError("No working Gemini model found for this API key. Check Step 1 diagnostic page.")
-
-model = get_working_model()
+model = genai.GenerativeModel("gemini-2.0-flash")
 
 EXTRACTION_PROMPT = """You are a legal-clause structured information extractor.
 Given a clause from a rental agreement or employment offer letter, extract the fields below.
