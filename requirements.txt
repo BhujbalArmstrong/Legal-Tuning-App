@@ -11,4 +11,4 @@ pandas
 google-generativeai
 python-docx
 regex
-gradio_client
+gradio_client==1.4.0
