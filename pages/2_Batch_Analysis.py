@@ -4,9 +4,10 @@ import time
 
 from ocr_utils import extract_text
 from segment_utils import segment_clauses
-from translate_compare import translate_google, back_translate
+from translate_compare import translate_google, translate_mymemory, back_translate
 from llm_pipeline import run_proposed_pipeline, run_single_prompt_baseline
 from evaluate_utils import number_mismatch_flag, round_trip_consistency, aggregate_summary
+from indictrans_utils import translate_indictrans2
 
 st.set_page_config(page_title="Batch Analysis — Legal Tuning", layout="wide")
 
@@ -55,6 +56,11 @@ if uploaded_files and st.button("Run Batch Analysis"):
                 pipeline_outputs["Baseline 1 (Google Translate, direct)"] = f"[ERROR: {e}]"
 
             try:
+                pipeline_outputs["Baseline 1b (MyMemory, direct)"] = translate_mymemory(clause_text)
+            except Exception as e:
+                pipeline_outputs["Baseline 1b (MyMemory, direct)"] = f"[ERROR: {e}]"
+
+            try:
                 pipeline_outputs["Baseline 2 (Single-prompt LLM)"] = run_single_prompt_baseline(clause_text)
             except Exception as e:
                 pipeline_outputs["Baseline 2 (Single-prompt LLM)"] = f"[ERROR: {e}]"
@@ -64,6 +70,11 @@ if uploaded_files and st.button("Run Batch Analysis"):
                 pipeline_outputs["Proposed (Structured pipeline)"] = proposed["hindi_output"]
             except Exception as e:
                 pipeline_outputs["Proposed (Structured pipeline)"] = f"[ERROR: {e}]"
+
+            try:
+                pipeline_outputs["Baseline 3 (IndicTrans2)"] = translate_indictrans2(clause_text)
+            except Exception as e:
+                pipeline_outputs["Baseline 3 (IndicTrans2)"] = f"[ERROR: {e}]"
 
             for pipeline_name, output in pipeline_outputs.items():
                 mismatch = number_mismatch_flag(clause_text, output)
@@ -80,7 +91,7 @@ if uploaded_files and st.button("Run Batch Analysis"):
                     "Numbers in source": len(mismatch["source_numbers"]),
                     "Numbers missing": len(mismatch["missing_numbers"]),
                     "Number mismatch flag": "⚠️ YES" if mismatch["flag_mismatch"] else "OK",
-                    "Back-translation (round-trip) BERTScore F1": round(consistency["f1"], 3) if consistency["f1"] else "N/A",
+                    "Back-translation (round-trip) BERTScore F1": round(consistency["f1"], 3) if consistency["f1"] is not None else None,
                 })
 
             progress_bar.progress((idx + 1) / total)
@@ -108,4 +119,4 @@ if uploaded_files and st.button("Run Batch Analysis"):
             summary_df.to_csv(index=False).encode("utf-8"),
             file_name="batch_summary_report.csv",
             mime="text/csv",
-                                        )
+                                                                 )
