@@ -11,3 +11,4 @@ pandas
 google-generativeai
 python-docx
 regex
+gradio_client
