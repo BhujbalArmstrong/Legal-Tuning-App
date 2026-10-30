@@ -73,7 +73,7 @@ if uploaded_file:
                 "Numbers in source": len(mismatch["source_numbers"]),
                 "Numbers missing in output": len(mismatch["missing_numbers"]),
                 "Number mismatch flag": "⚠️ YES" if mismatch["flag_mismatch"] else "OK",
-                "Back-translation (round-trip) BERTScore F1": round(consistency["f1"], 3) if consistency["f1"] else "N/A",
+                "Back-translation (round-trip) BERTScore F1": round(consistency["f1"], 3) if consistency["f1"] is not None else None,
             })
 
         df = pd.DataFrame(rows)
