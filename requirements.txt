@@ -11,6 +11,6 @@ pandas
 google-generativeai
 python-docx
 regex
-pyarrow<14.0.0
-datasets<2.16.0
+datasets>=2.19.0
+evaluate>=0.4.2
 gradio_client==1.4.0
