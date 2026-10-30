@@ -9,7 +9,11 @@ def get_client():
     global _client
     if _client is None:
         hf_token = st.secrets.get("HF_TOKEN", None)
-        _client = Client(SPACE_ID, hf_token=hf_token)
+        try:
+            _client = Client(SPACE_ID, hf_token=hf_token)
+        except TypeError:
+            # Installed gradio_client version doesn't support hf_token param
+            _client = Client(SPACE_ID)
     return _client
 
 def translate_indictrans2(text, tgt_lang="hin_Deva"):
