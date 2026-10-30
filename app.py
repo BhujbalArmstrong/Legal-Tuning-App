@@ -6,6 +6,7 @@ from segment_utils import segment_clauses
 from translate_compare import translate_google, translate_mymemory, back_translate
 from llm_pipeline import run_proposed_pipeline, run_single_prompt_baseline
 from evaluate_utils import number_mismatch_flag, round_trip_consistency
+from indictrans_utils import translate_indictrans2
 
 st.set_page_config(page_title="Legal Tuning — Simplification & Translation Comparator", layout="wide")
 
@@ -47,6 +48,9 @@ if uploaded_file:
         with st.spinner("Proposed: Structured extraction -> simplify -> translate..."):
             proposed = run_proposed_pipeline(selected_clause)
             results["Proposed (Structured pipeline)"] = proposed["hindi_output"]
+
+        with st.spinner("Baseline 3: IndicTrans2 (ai4bharat, direct)..."):
+            results["Baseline 3 (IndicTrans2)"] = translate_indictrans2(selected_clause)
 
         st.subheader("3. Side-by-Side Output Comparison")
         for name, output in results.items():
