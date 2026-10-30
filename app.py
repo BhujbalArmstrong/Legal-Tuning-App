@@ -64,6 +64,8 @@ if uploaded_file:
         for name, output in results.items():
             mismatch = number_mismatch_flag(selected_clause, output)
             back = back_translate(output) if output and not output.startswith("[") else ""
+            if back.startswith("["):
+                back = ""  # back-translation itself failed; don't score a garbage string
             consistency = round_trip_consistency(selected_clause, back) if back else {"f1": None}
 
             rows.append({
