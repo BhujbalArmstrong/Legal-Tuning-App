@@ -14,6 +14,6 @@ def translate_mymemory(text: str, target="hi") -> str:
 
 def back_translate(hindi_text: str) -> str:
     try:
-        return GoogleTranslator(source="hi", target="en").translate(hindi_text)
+        return MyMemoryTranslator(source="hi-IN", target="en-GB").translate(hindi_text)
     except Exception as e:
         return f"[BackTranslate ERROR: {e}]"
