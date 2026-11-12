@@ -8,7 +8,8 @@ st.set_page_config(page_title="Agentic Pipeline (LangGraph)", layout="wide")
 st.title("Agentic Legal Tuning (LangChain + LangGraph)")
 st.caption(
     "Extract → English → Hindi → Verify → (Reflect → regenerate) → Finalize. "
-    "The verifier checks numbers and meaning, and loops back with feedback if it fails."
+    "The verifier checks numbers and meaning, and loops back with feedback if it fails. "
+    "Calls are spaced about 12 s apart for the free tier, so one attempt takes roughly 1 minute."
 )
 
 
@@ -57,6 +58,7 @@ if st.button("Run agentic pipeline"):
         "history": [],
     }
 
+    t_start = time.time()
     st.subheader("Live trace")
     try:
         with st.spinner("Running graph..."):
@@ -68,13 +70,21 @@ if st.button("Run agentic pipeline"):
     except Exception as e:
         st.error(f"Pipeline error: {e}")
         st.stop()
+    state["elapsed_seconds"] = round(time.time() - t_start, 1)
 
     final = state.get("final", {})
+    status = final.get("status")
     st.subheader("Result")
-    if final.get("status") == "passed":
+    if status == "passed":
         st.success(f"Passed verification after {final.get('attempts_used')} attempt(s).")
+    elif status == "passed_numbers_only":
+        st.warning(
+            f"Numbers verified after {final.get('attempts_used')} attempt(s), "
+            "but the LLM judge was unavailable, so meaning was not checked."
+        )
     else:
         st.warning("Verification still failing after the maximum attempts. Needs human review.")
+    st.caption(f"Model: {final.get('model_used')} | elapsed: {state['elapsed_seconds']} s")
 
     st.markdown("**Hindi output**")
     st.write(final.get("hindi", ""))
@@ -86,7 +96,7 @@ if st.button("Run agentic pipeline"):
         {
             "Attempt": h["attempt"],
             "Missing numbers": ", ".join(h["missing_numbers"]) or "none",
-            "Judge OK": h["judge_ok"],
+            "Judge": h["judge_status"],
             "Passed": h["passed"],
         }
         for h in state.get("history", [])
