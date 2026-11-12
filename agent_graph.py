@@ -20,43 +20,59 @@ SAMPLE_CLAUSE = (
 
 
 # ---------------------------------------------------------------- Gemini
-_MODEL_NAME = None
+_WORKING_MODEL = None
 
 
-def _get_model_name():
-    global _MODEL_NAME
-    if _MODEL_NAME:
-        return _MODEL_NAME
+def _version(name: str) -> float:
+    m = re.search(r"gemini-(\d+(?:\.\d+)?)", name)
+    return float(m.group(1)) if m else 0.0
+
+
+def _candidate_models() -> List[str]:
+    """Flash models available to this key, newest version first."""
     genai.configure(api_key=os.environ.get("GEMINI_API_KEY"))
     names = [
         m.name for m in genai.list_models()
         if "generateContent" in getattr(m, "supported_generation_methods", [])
     ]
-    preferred = [
+    flash = [
         n for n in names
-        if "flash" in n and not any(x in n for x in ("exp", "preview", "lite", "thinking", "image", "tts"))
+        if "flash" in n
+        and not any(x in n for x in ("exp", "preview", "lite", "thinking", "image", "tts", "live", "audio"))
     ]
-    _MODEL_NAME = (preferred or names)[0]
-    return _MODEL_NAME
+    flash.sort(key=_version, reverse=True)
+    return (flash or names)[:6]
 
 
 def call_gemini(prompt_text: str) -> str:
+    global _WORKING_MODEL
     genai.configure(api_key=os.environ.get("GEMINI_API_KEY"))
-    model = genai.GenerativeModel(_get_model_name())
+
+    if _WORKING_MODEL:
+        candidates = [_WORKING_MODEL]
+    else:
+        override = os.environ.get("GEMINI_MODEL")
+        candidates = ([override] if override else []) + _candidate_models()
+
     last_err = None
-    for _ in range(3):
-        try:
-            resp = model.generate_content(
-                prompt_text,
-                generation_config=genai.GenerationConfig(temperature=0.2),
-            )
-            return resp.text.strip()
-        except Exception as e:  # rate limit etc.
-            last_err = e
-            msg = str(e).lower()
-            if "429" in msg or "quota" in msg or "exhausted" in msg:
-                time.sleep(12)
-            else:
+    for name in candidates:
+        model = genai.GenerativeModel(name)
+        for _ in range(3):
+            try:
+                resp = model.generate_content(
+                    prompt_text,
+                    generation_config=genai.GenerationConfig(temperature=0.2),
+                )
+                _WORKING_MODEL = name
+                return resp.text.strip()
+            except Exception as e:
+                last_err = e
+                msg = str(e).lower()
+                if "429" in msg or "quota" in msg or "exhausted" in msg:
+                    time.sleep(12)
+                    continue
+                if "404" in msg or "no longer available" in msg or "not found" in msg:
+                    break  # try the next candidate model
                 raise
     raise last_err
 
@@ -232,6 +248,7 @@ def finalize_node(state: GraphState):
         "attempts_used": state["attempt"],
         "hindi": state["hindi"],
         "english": state["english"],
+        "model_used": _WORKING_MODEL,
         "field_found_verbatim_in_source": grounding,
     }}
 
