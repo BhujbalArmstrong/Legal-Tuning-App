@@ -1,6 +1,7 @@
 import os
 import re
 import json
+import time
 import concurrent.futures
 from typing import TypedDict, List
 
@@ -18,9 +19,11 @@ SAMPLE_CLAUSE = (
     "damage beyond normal wear and tear."
 )
 
-CALL_TIMEOUT = 40
-LIST_TIMEOUT = 20
+CALL_TIMEOUT = 90          # seconds allowed per Gemini call
+LIST_TIMEOUT = 20          # seconds allowed for listing models
+MIN_GAP = 12               # seconds between calls (free tier ~5 requests/minute)
 _pool = concurrent.futures.ThreadPoolExecutor(max_workers=4)
+_last_call = [0.0]
 
 
 # ---------------------------------------------------------------- Gemini
@@ -29,6 +32,13 @@ _WORKING_MODEL = None
 
 def _configure():
     genai.configure(api_key=os.environ.get("GEMINI_API_KEY"), transport="rest")
+
+
+def _pace():
+    wait = MIN_GAP - (time.time() - _last_call[0])
+    if wait > 0:
+        time.sleep(wait)
+    _last_call[0] = time.time()
 
 
 def _version(name: str) -> float:
@@ -72,21 +82,31 @@ def call_gemini(prompt_text: str) -> str:
 
     errors = []
     for name in candidates:
-        def _call(n=name):
-            model = genai.GenerativeModel(n)
-            return model.generate_content(
-                prompt_text,
-                generation_config=genai.GenerationConfig(temperature=0.2),
-                request_options={"timeout": CALL_TIMEOUT},
-            )
-        try:
-            resp = _pool.submit(_call).result(timeout=CALL_TIMEOUT + 10)
-            _WORKING_MODEL = name
-            return resp.text.strip()
-        except concurrent.futures.TimeoutError:
-            errors.append(f"{name}: timed out after {CALL_TIMEOUT}s")
-        except Exception as e:
-            errors.append(f"{name}: {str(e)[:200]}")
+        for attempt in (1, 2):
+            _pace()
+
+            def _call(n=name):
+                model = genai.GenerativeModel(n)
+                return model.generate_content(
+                    prompt_text,
+                    generation_config=genai.GenerationConfig(temperature=0.2),
+                    request_options={"timeout": CALL_TIMEOUT},
+                )
+
+            try:
+                resp = _pool.submit(_call).result(timeout=CALL_TIMEOUT + 10)
+                _WORKING_MODEL = name
+                return resp.text.strip()
+            except concurrent.futures.TimeoutError:
+                errors.append(f"{name}: timed out after {CALL_TIMEOUT}s (try {attempt})")
+            except Exception as e:
+                errors.append(f"{name}: {str(e)[:160]}")
+                msg = str(e).lower()
+                retryable = any(k in msg for k in ("429", "quota", "exhausted", "timed out", "timeout"))
+                if not retryable:
+                    break  # e.g. 404: go to the next model
+                if attempt == 1:
+                    time.sleep(15)
     raise RuntimeError("All Gemini models failed -> " + " | ".join(errors))
 
 
@@ -221,15 +241,29 @@ def verify_node(state: GraphState):
     nums = check_numbers(state["clause"], state["hindi"])
     judge = ""
     judge_ok = True
+    judge_status = "off"
     if state.get("use_judge", True):
-        judge = judge_chain.invoke({"clause": state["clause"], "hindi": state["hindi"]})
-        judge_ok = judge.strip().upper().startswith("OK")
+        try:
+            judge = judge_chain.invoke({"clause": state["clause"], "hindi": state["hindi"]})
+            judge_ok = judge.strip().upper().startswith("OK")
+            judge_status = "OK" if judge_ok else "PROBLEM"
+        except Exception as e:
+            # judge is auxiliary: if it fails, fall back to the number check alone
+            judge = f"[judge unavailable: {str(e)[:200]}]"
+            judge_ok = True
+            judge_status = "unavailable"
     passed = (len(nums["missing_numbers"]) == 0) and judge_ok
-    verification = {**nums, "judge": judge, "judge_ok": judge_ok, "passed": passed}
+    verification = {
+        **nums,
+        "judge": judge,
+        "judge_ok": judge_ok,
+        "judge_status": judge_status,
+        "passed": passed,
+    }
     history = list(state.get("history", [])) + [{
         "attempt": state.get("attempt", 1),
         "missing_numbers": nums["missing_numbers"],
-        "judge_ok": judge_ok,
+        "judge_status": judge_status,
         "passed": passed,
     }]
     return {"verification": verification, "history": history}
@@ -255,9 +289,13 @@ def finalize_node(state: GraphState):
     for k, v in (state.get("structured") or {}).items():
         if isinstance(v, str) and v.strip():
             grounding[k] = v.strip().lower() in clause_l
-    passed = state["verification"]["passed"]
+    v = state["verification"]
+    if v["passed"]:
+        status = "passed" if v["judge_status"] in ("OK", "off") else "passed_numbers_only"
+    else:
+        status = "failed_after_max_attempts"
     return {"final": {
-        "status": "passed" if passed else "failed_after_max_attempts",
+        "status": status,
         "attempts_used": state["attempt"],
         "hindi": state["hindi"],
         "english": state["english"],
