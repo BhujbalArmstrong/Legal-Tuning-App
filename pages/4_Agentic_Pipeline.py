@@ -1,6 +1,8 @@
 import json
+import time
 import streamlit as st
-from agent_graph import build_graph, SAMPLE_CLAUSE
+import agent_graph
+from agent_graph import build_graph, SAMPLE_CLAUSE, call_gemini
 
 st.set_page_config(page_title="Agentic Pipeline (LangGraph)", layout="wide")
 st.title("Agentic Legal Tuning (LangChain + LangGraph)")
@@ -17,6 +19,19 @@ def get_graph():
 
 graph = get_graph()
 
+st.subheader("Step 0: Gemini connection test (1 cheap call)")
+if st.button("Test Gemini connection"):
+    t0 = time.time()
+    try:
+        reply = call_gemini("Reply with the single word: ready")
+        st.success(
+            f"Gemini works. Model: {agent_graph._WORKING_MODEL} | "
+            f"{time.time() - t0:.1f}s | reply: {reply}"
+        )
+    except Exception as e:
+        st.error(f"Gemini failed after {time.time() - t0:.0f}s: {e}")
+
+st.subheader("Step 1: Run the agent")
 clause = st.text_area("English clause", value=SAMPLE_CLAUSE, height=170)
 c1, c2 = st.columns(2)
 max_attempts = c1.slider("Max attempts", 1, 3, 3)
@@ -87,4 +102,4 @@ if st.button("Run agentic pipeline"):
         data=json.dumps(state, ensure_ascii=False, indent=2),
         file_name="agentic_run.json",
         mime="application/json",
-  )
+    )
