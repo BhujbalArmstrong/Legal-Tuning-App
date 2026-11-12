@@ -1,19 +1,22 @@
 import os
-import re
 import time
 import concurrent.futures
 import google.generativeai as genai
 
-CALL_TIMEOUT = 90                 # seconds allowed per Gemini call
-LIST_TIMEOUT = 20
-MIN_SECONDS_BETWEEN_CALLS = 13    # free tier ~5 requests/minute
+CALL_TIMEOUT = 60                 # seconds allowed per Gemini call
+MIN_SECONDS_BETWEEN_CALLS = 6     # model allows ~15 requests/minute
+PREFERRED_MODELS = [
+    "models/gemini-3.5-flash-lite",
+    "models/gemini-3.5-flash",
+    "models/gemini-3.1-flash-lite",
+]
 _pool = concurrent.futures.ThreadPoolExecutor(max_workers=4)
 _last_call_time = [0.0]
 WORKING_MODEL = None
 
 
 def _configure():
-    genai.configure(api_key=os.environ.get("GEMINI_API_KEY"), transport="rest")
+    genai.configure(api_key=os.environ.get("GEMINI_API_KEY"), transport="grpc")
 
 
 def _wait_for_rate_limit():
@@ -23,33 +26,12 @@ def _wait_for_rate_limit():
     _last_call_time[0] = time.time()
 
 
-def _version(name: str) -> float:
-    m = re.search(r"gemini-(\d+(?:\.\d+)?)", name)
-    return float(m.group(1)) if m else 0.0
-
-
-def _candidate_models():
-    """Flash models available to this key, newest version first (max 4)."""
-    _configure()
-
-    def _list():
-        return [
-            m.name for m in genai.list_models()
-            if "generateContent" in getattr(m, "supported_generation_methods", [])
-        ]
-
-    try:
-        names = _pool.submit(_list).result(timeout=LIST_TIMEOUT)
-    except Exception:
-        return ["models/gemini-flash-latest"]
-
-    flash = [
-        n for n in names
-        if "flash" in n
-        and not any(x in n for x in ("exp", "preview", "lite", "thinking", "image", "tts", "live", "audio"))
-    ]
-    flash.sort(key=_version, reverse=True)
-    return (flash or names)[:4]
+def _model_order():
+    order = []
+    for n in [WORKING_MODEL, os.environ.get("GEMINI_MODEL")] + PREFERRED_MODELS:
+        if n and n not in order:
+            order.append(n)
+    return order
 
 
 EXTRACTION_PROMPT = """You are a legal-clause structured information extractor.
@@ -90,23 +72,18 @@ Hindi translation:
 """
 
 
-def call_llm(prompt: str, max_retries: int = 2) -> str:
-    """Calls Gemini with timeout, pacing, retry, and model fallback.
+def call_llm(prompt: str) -> str:
+    """Calls Gemini with timeout, pacing, retry and model fallback.
     Returns an error string starting with '[' on failure (never raises)."""
     global WORKING_MODEL
     try:
         _configure()
-        if WORKING_MODEL:
-            candidates = [WORKING_MODEL]
-        else:
-            override = os.environ.get("GEMINI_MODEL")
-            candidates = ([override] if override else []) + _candidate_models()
     except Exception as e:
         return f"[LLM ERROR: setup failed: {e}]"
 
     errors = []
-    for name in candidates:
-        for attempt in range(max_retries):
+    for name in _model_order():
+        for attempt in (1, 2):
             _wait_for_rate_limit()
 
             def _call(n=name):
@@ -122,11 +99,13 @@ def call_llm(prompt: str, max_retries: int = 2) -> str:
             except Exception as e:
                 errors.append(f"{name}: {str(e)[:150]}")
                 msg = str(e).lower()
-                retryable = any(k in msg for k in ("429", "quota", "exhausted", "timed out", "timeout"))
-                if not retryable:
-                    break  # e.g. 404: next model
-                if attempt < max_retries - 1:
-                    time.sleep(15 * (attempt + 1))
+                if any(k in msg for k in ("429", "quota", "exhausted")):
+                    break  # quota used up: next model immediately
+                if any(k in msg for k in ("503", "504", "deadline", "unavailable", "timed out", "timeout")):
+                    if attempt == 1:
+                        time.sleep(5)
+                    continue  # retry once
+                break  # e.g. 404: next model
     return "[LLM ERROR: all models failed -> " + " | ".join(errors) + "]"
 
 
