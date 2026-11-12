@@ -1,5 +1,4 @@
 import os
-import re
 import time
 import concurrent.futures
 
@@ -8,7 +7,7 @@ import google.generativeai as genai
 from indictrans_utils import translate_indictrans2
 
 st.set_page_config(page_title="Check Available Models", layout="wide")
-st.title("Gemini model and transport check")
+st.title("Gemini model check (gRPC)")
 
 API_KEY = os.environ.get("GEMINI_API_KEY")
 if not API_KEY:
@@ -17,26 +16,25 @@ if not API_KEY:
 
 _pool = concurrent.futures.ThreadPoolExecutor(max_workers=2)
 
-
-def _version(name: str) -> float:
-    m = re.search(r"gemini-(\d+(?:\.\d+)?)", name)
-    return float(m.group(1)) if m else 0.0
-
-
-def configure(transport: str):
-    genai.configure(api_key=API_KEY, transport=transport)
+# Models with higher free-tier request limits (from the AI Studio Rate Limit page)
+CANDIDATES = [
+    "models/gemini-3.5-flash-lite",
+    "models/gemini-3.1-flash-lite",
+    "models/gemini-3.6-flash",
+    "models/gemini-3.5-flash",
+]
 
 
 def list_models():
-    configure("rest")
+    genai.configure(api_key=API_KEY, transport="grpc")
     return [
         m.name for m in genai.list_models()
         if "generateContent" in getattr(m, "supported_generation_methods", [])
     ]
 
 
-def test_one(name: str, transport: str, timeout: int = 30):
-    configure(transport)
+def test_one(name: str, timeout: int = 30):
+    genai.configure(api_key=API_KEY, transport="grpc")
 
     def _call():
         model = genai.GenerativeModel(name)
@@ -50,11 +48,11 @@ def test_one(name: str, transport: str, timeout: int = 30):
     fut = _pool.submit(_call)
     try:
         text = fut.result(timeout=timeout + 10)
-        return round(time.time() - t0, 1), "OK: " + text[:40]
+        return round(time.time() - t0, 1), True, text
     except concurrent.futures.TimeoutError:
-        return round(time.time() - t0, 1), "TIMEOUT (no reply)"
+        return round(time.time() - t0, 1), False, "TIMEOUT (no reply)"
     except Exception as e:
-        return round(time.time() - t0, 1), "ERROR: " + str(e)[:160]
+        return round(time.time() - t0, 1), False, str(e)
 
 
 st.subheader("1. Models your key can use")
@@ -67,28 +65,30 @@ if st.button("List models"):
 models = st.session_state.get("models", [])
 if models:
     st.write(f"{len(models)} models support generateContent.")
-    st.code("\n".join(models), language="text")
+    with st.expander("Show full list"):
+        st.code("\n".join(models), language="text")
 
-    flash = sorted([m for m in models if "flash" in m], key=_version, reverse=True)
-    chosen = st.multiselect("Models to test", models, default=flash[:2])
-    transports = st.multiselect("Transports", ["rest", "grpc"], default=["rest", "grpc"])
+st.subheader("2. Test the candidate models (one tiny prompt each)")
+extra = st.text_input("Optional extra model name to test (e.g. models/gemma-4-26b...)", "")
+if st.button("Test candidate models"):
+    available = set(st.session_state.get("models") or list_models())
+    to_test = [m for m in CANDIDATES + ([extra.strip()] if extra.strip() else []) if m in available]
+    skipped = [m for m in CANDIDATES if m not in available]
+    if skipped:
+        st.info("Not in your model list, skipped: " + ", ".join(skipped))
 
-    st.subheader("2. Latency test (one tiny prompt each, 12 s apart)")
-    if st.button("Run latency test"):
-        rows = []
-        table = st.empty()
-        total = len(chosen) * len(transports)
-        done = 0
-        for name in chosen:
-            for tr in transports:
-                done += 1
-                with st.spinner(f"Testing {name} via {tr} ({done}/{total})..."):
-                    secs, result = test_one(name, tr)
-                rows.append({"Model": name, "Transport": tr, "Seconds": secs, "Result": result})
-                table.table(rows)
-                if done < total:
-                    time.sleep(12)
-        st.success("Done. Screenshot the table.")
+    summary = []
+    for i, name in enumerate(to_test):
+        with st.spinner(f"Testing {name} ({i + 1}/{len(to_test)})..."):
+            secs, ok, detail = test_one(name)
+        summary.append({"Model": name, "Seconds": secs, "Result": "OK" if ok else "FAILED"})
+        if ok:
+            st.success(f"{name} | {secs}s | reply: {detail}")
+        else:
+            st.error(f"{name} | {secs}s | {detail}")
+        time.sleep(3)
+    if summary:
+        st.table(summary)
 
 st.divider()
 st.subheader("IndicTrans2 Test (temporary)")
