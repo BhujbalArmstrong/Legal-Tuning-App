@@ -1,19 +1,30 @@
+import concurrent.futures
 from deep_translator import GoogleTranslator, MyMemoryTranslator
 
-def translate_google(text: str, target="hi") -> str:
+TIMEOUT_SECONDS = 30
+_pool = concurrent.futures.ThreadPoolExecutor(max_workers=8)
+
+
+def _run(fn, label: str) -> str:
+    fut = _pool.submit(fn)
     try:
-        return GoogleTranslator(source="en", target=target).translate(text)
+        return fut.result(timeout=TIMEOUT_SECONDS)
+    except concurrent.futures.TimeoutError:
+        return f"[{label} ERROR: timed out after {TIMEOUT_SECONDS}s]"
     except Exception as e:
-        return f"[GoogleTranslator ERROR: {e}]"
+        return f"[{label} ERROR: {e}]"
+
+
+def translate_google(text: str, target="hi") -> str:
+    return _run(lambda: GoogleTranslator(source="en", target=target).translate(text),
+                "GoogleTranslator")
+
 
 def translate_mymemory(text: str, target="hi") -> str:
-    try:
-        return MyMemoryTranslator(source="en-GB", target="hi-IN").translate(text)
-    except Exception as e:
-        return f"[MyMemory ERROR: {e}]"
+    return _run(lambda: MyMemoryTranslator(source="en-GB", target="hi-IN").translate(text),
+                "MyMemory")
+
 
 def back_translate(hindi_text: str) -> str:
-    try:
-        return MyMemoryTranslator(source="hi-IN", target="en-GB").translate(hindi_text)
-    except Exception as e:
-        return f"[BackTranslate ERROR: {e}]"
+    return _run(lambda: MyMemoryTranslator(source="hi-IN", target="en-GB").translate(hindi_text),
+                "BackTranslate")
