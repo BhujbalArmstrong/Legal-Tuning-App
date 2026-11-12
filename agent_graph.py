@@ -1,7 +1,7 @@
 import os
 import re
 import json
-import time
+import concurrent.futures
 from typing import TypedDict, List
 
 import google.generativeai as genai
@@ -18,9 +18,17 @@ SAMPLE_CLAUSE = (
     "damage beyond normal wear and tear."
 )
 
+CALL_TIMEOUT = 40
+LIST_TIMEOUT = 20
+_pool = concurrent.futures.ThreadPoolExecutor(max_workers=4)
+
 
 # ---------------------------------------------------------------- Gemini
 _WORKING_MODEL = None
+
+
+def _configure():
+    genai.configure(api_key=os.environ.get("GEMINI_API_KEY"), transport="rest")
 
 
 def _version(name: str) -> float:
@@ -29,24 +37,32 @@ def _version(name: str) -> float:
 
 
 def _candidate_models() -> List[str]:
-    """Flash models available to this key, newest version first."""
-    genai.configure(api_key=os.environ.get("GEMINI_API_KEY"))
-    names = [
-        m.name for m in genai.list_models()
-        if "generateContent" in getattr(m, "supported_generation_methods", [])
-    ]
+    """Flash models available to this key, newest version first (max 4)."""
+    _configure()
+
+    def _list():
+        return [
+            m.name for m in genai.list_models()
+            if "generateContent" in getattr(m, "supported_generation_methods", [])
+        ]
+
+    try:
+        names = _pool.submit(_list).result(timeout=LIST_TIMEOUT)
+    except Exception:
+        return ["models/gemini-flash-latest"]
+
     flash = [
         n for n in names
         if "flash" in n
         and not any(x in n for x in ("exp", "preview", "lite", "thinking", "image", "tts", "live", "audio"))
     ]
     flash.sort(key=_version, reverse=True)
-    return (flash or names)[:6]
+    return (flash or names)[:4]
 
 
 def call_gemini(prompt_text: str) -> str:
     global _WORKING_MODEL
-    genai.configure(api_key=os.environ.get("GEMINI_API_KEY"))
+    _configure()
 
     if _WORKING_MODEL:
         candidates = [_WORKING_MODEL]
@@ -54,27 +70,24 @@ def call_gemini(prompt_text: str) -> str:
         override = os.environ.get("GEMINI_MODEL")
         candidates = ([override] if override else []) + _candidate_models()
 
-    last_err = None
+    errors = []
     for name in candidates:
-        model = genai.GenerativeModel(name)
-        for _ in range(3):
-            try:
-                resp = model.generate_content(
-                    prompt_text,
-                    generation_config=genai.GenerationConfig(temperature=0.2),
-                )
-                _WORKING_MODEL = name
-                return resp.text.strip()
-            except Exception as e:
-                last_err = e
-                msg = str(e).lower()
-                if "429" in msg or "quota" in msg or "exhausted" in msg:
-                    time.sleep(12)
-                    continue
-                if "404" in msg or "no longer available" in msg or "not found" in msg:
-                    break  # try the next candidate model
-                raise
-    raise last_err
+        def _call(n=name):
+            model = genai.GenerativeModel(n)
+            return model.generate_content(
+                prompt_text,
+                generation_config=genai.GenerationConfig(temperature=0.2),
+                request_options={"timeout": CALL_TIMEOUT},
+            )
+        try:
+            resp = _pool.submit(_call).result(timeout=CALL_TIMEOUT + 10)
+            _WORKING_MODEL = name
+            return resp.text.strip()
+        except concurrent.futures.TimeoutError:
+            errors.append(f"{name}: timed out after {CALL_TIMEOUT}s")
+        except Exception as e:
+            errors.append(f"{name}: {str(e)[:200]}")
+    raise RuntimeError("All Gemini models failed -> " + " | ".join(errors))
 
 
 def _llm(prompt_value) -> str:
