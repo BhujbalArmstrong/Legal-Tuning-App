@@ -343,4 +343,4 @@ SAMPLE_CLAUSE = (
     "on or before the date of execution of this Agreement. The Landlord shall return the "
     "deposit within 30 days of the Tenant vacating the premises, after deducting any "
     "amounts due towards unpaid rent or damage beyond normal wear and tear."
-    )
+                            )
