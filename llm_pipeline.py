@@ -7,8 +7,8 @@ CALL_TIMEOUT = 60                 # seconds allowed per Gemini call
 MIN_SECONDS_BETWEEN_CALLS = 6     # model allows ~15 requests/minute
 PREFERRED_MODELS = [
     "models/gemini-3.5-flash-lite",
-    "models/gemini-3.5-flash",
     "models/gemini-3.1-flash-lite",
+    "models/gemini-3.5-flash",
 ]
 _pool = concurrent.futures.ThreadPoolExecutor(max_workers=4)
 _last_call_time = [0.0]
