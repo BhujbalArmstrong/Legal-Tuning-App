@@ -19,8 +19,8 @@ CALL_TIMEOUT = 60
 MIN_GAP = 6
 PREFERRED_MODELS = [
     "models/gemini-3.5-flash-lite",
-    "models/gemini-3.5-flash",
     "models/gemini-3.1-flash-lite",
+    "models/gemini-3.5-flash",
 ]
 
 _lock = threading.Lock()
